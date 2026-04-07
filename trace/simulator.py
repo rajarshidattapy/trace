@@ -1,0 +1,237 @@
+"""State transition logic for TRACE environment."""
+
+from datetime import datetime, timedelta
+from trace.models import Observation, Action
+from trace.scenarios import create_scenario
+
+
+class Simulator:
+    """Deterministic state transition engine."""
+    
+    def __init__(self, task_id: str, seed: int = 0):
+        self.task_id = task_id
+        self.seed = seed
+        self.scenario = create_scenario(task_id, seed)
+        self.current_obs = None
+        self.current_time = None
+        self.step_count = 0
+        self.root_cause_revealed = {}  # tracks which causes have been revealed
+    
+    def reset(self) -> Observation:
+        """Reset environment and return initial observation."""
+        self.scenario.reset()
+        self.step_count = 0
+        self.current_time = datetime.now()
+        self.root_cause_revealed = {}
+        
+        # Generate initial state
+        metrics = self.scenario.step(action_taken=False)
+        self.current_obs = self._build_observation(metrics)
+        
+        return self.current_obs
+    
+    def step(self, action: Action) -> tuple[Observation, float, bool, dict]:
+        """
+        Execute one step.
+        
+        Returns:
+            observation, reward, done, info
+        """
+        self.step_count += 1
+        
+        # Check if action is valid/relevant
+        is_relevant = self._is_action_relevant(action)
+        solves_issue = self._does_action_solve(action)
+        
+        # Progress scenario
+        # If remediation action, mark as "taken"
+        remediation_actions = {
+            "restart_service", "scale_workers", "restart_database",
+            "rollback_release", "clear_queue"
+        }
+        action_taken = action.action_type in remediation_actions and solves_issue
+        
+        metrics = self.scenario.step(action_taken=action_taken)
+        
+        # Handle inspection actions (reveal ground truth)
+        inspection_msg = self._handle_inspection(action)
+        
+        incident_resolved = self.scenario.is_resolved()
+        
+        # Calculate reward (cumulative, not per-step clamped)
+        reward = self._calculate_step_reward(
+            action=action,
+            is_relevant=is_relevant,
+            solves_issue=solves_issue,
+            incident_resolved=incident_resolved
+        )
+        
+        # Build observation
+        self.current_obs = self._build_observation(metrics, inspection_msg)
+        
+        # Check terminal condition
+        done = action.action_type in ["declare_healthy", "declare_unfixable"]
+        if done and action.action_type == "declare_healthy" and not incident_resolved:
+            reward -= 5.0  # penalty for falsely declaring healthy
+        
+        info = {
+            "step": self.step_count,
+            "root_cause": self._get_root_cause(),
+            "is_resolved": incident_resolved,
+        }
+        
+        return self.current_obs, reward, done, info
+    
+    def _build_observation(self, metrics: dict, inspection_msg: str = None) -> Observation:
+        """Build observation from metrics and optional inspection."""
+        # Determine service statuses based on metrics
+        services = {
+            "api_workers": self._get_service_status(
+                metrics.get("cpu_usage_pct", 50),
+                metrics.get("error_rate_pct", 0)
+            ),
+            "queue_service": self._get_service_status(
+                metrics.get("queue_depth", 0) / 1000,
+                metrics.get("error_rate_pct", 0)
+            ),
+            "database": self._get_service_status(
+                metrics.get("memory_usage_pct", 50),
+                metrics.get("api_latency_ms", 100) / 1000
+            )
+        }
+        
+        # Determine active alerts
+        active_alerts = []
+        if metrics.get("cpu_usage_pct", 0) > 75:
+            active_alerts.append("alert_cpu_high")
+        if metrics.get("error_rate_pct", 0) > 5:
+            active_alerts.append("alert_high_error_rate")
+        if metrics.get("queue_depth", 0) > 500:
+            active_alerts.append("alert_queue_backlog")
+        if metrics.get("api_latency_ms", 0) > 1000:
+            active_alerts.append("alert_db_slow")
+        if metrics.get("memory_usage_pct", 0) > 80:
+            active_alerts.append("alert_pool_exhaustion")
+        
+        return Observation(
+            timestamp=self.current_time.isoformat(),
+            cpu_usage_pct=metrics.get("cpu_usage_pct", 50),
+            memory_usage_pct=metrics.get("memory_usage_pct", 50),
+            error_rate_pct=metrics.get("error_rate_pct", 0),
+            api_latency_ms=metrics.get("api_latency_ms", 100),
+            queue_depth=metrics.get("queue_depth", 0),
+            services=services,
+            active_alerts=active_alerts,
+            last_inspection={"message": inspection_msg} if inspection_msg else None
+        )
+    
+    def _get_service_status(self, cpu_factor: float, error_factor: float) -> str:
+        """Map metrics to service status."""
+        combined_health = (cpu_factor + error_factor) / 2
+        
+        if combined_health > 0.7:
+            return "down"
+        elif combined_health > 0.4:
+            return "degraded"
+        else:
+            return "healthy"
+    
+    def _is_action_relevant(self, action: Action) -> bool:
+        """Check if action is relevant to current incident."""
+        # Inspection of relevant services/metrics is always somewhat relevant
+        if action.action_type.startswith("inspect_"):
+            return True
+        
+        # Remediation relevance depends on scenario
+        if self.task_id == "easy_cpu_spike":
+            return action.action_type == "scale_workers"
+        elif self.task_id == "medium_cascade":
+            return action.action_type in ["restart_service", "clear_queue"]
+        elif self.task_id == "hard_mixed":
+            return action.action_type in ["restart_database", "rollback_release"]
+        
+        return False
+    
+    def _does_action_solve(self, action: Action) -> bool:
+        """Check if action actually solves the active problem."""
+        root_cause = self._get_root_cause()
+        
+        if self.task_id == "easy_cpu_spike":
+            return action.action_type == "scale_workers" and action.action_type == "scale_workers"
+        elif self.task_id == "medium_cascade":
+            return action.action_type == "restart_service" and action.target == "queue_service"
+        elif self.task_id == "hard_mixed":
+            return action.action_type == "restart_database"
+        
+        return False
+    
+    def _handle_inspection(self, action: Action) -> str:
+        """Handle inspection actions, reveal ground truth behind them."""
+        if action.action_type == "inspect_logs":
+            target = action.target or ""
+            self.root_cause_revealed[f"logs_{target}"] = True
+            
+            if self.task_id == "easy_cpu_spike":
+                return "Traffic spike detected. Consider scaling workers."
+            elif self.task_id == "medium_cascade":
+                return "Queue service memory usage is spiking. May need restart."
+            elif self.task_id == "hard_mixed":
+                return "Database queries have increased since recent release."
+        
+        elif action.action_type == "inspect_metrics":
+            target = action.target or ""
+            self.root_cause_revealed[f"metrics_{target}"] = True
+            
+            if target == "queue_depth":
+                return "Queue depth critical and growing. Service memory may be leaking."
+            elif target == "db_connections":
+                return "Connection pool at 100% exhaustion. Restart needed."
+        
+        elif action.action_type == "inspect_alert":
+            alert_id = action.target or ""
+            self.root_cause_revealed[f"alert_{alert_id}"] = True
+            
+            if "pool" in alert_id:
+                return "DB connection pool exhausted. Restart database."
+            elif "queue" in alert_id:
+                return "Queue backlog growing due to service issue."
+        
+        return ""
+    
+    def _get_root_cause(self) -> str:
+        """Get the root cause for this scenario."""
+        if self.task_id == "easy_cpu_spike":
+            return "traffic_spike"
+        elif self.task_id == "medium_cascade":
+            return "queue_memory_leak"
+        elif self.task_id == "hard_mixed":
+            return "db_connection_pool + release_regression"
+        return "unknown"
+    
+    def _calculate_step_reward(
+        self,
+        action: Action,
+        is_relevant: bool,
+        solves_issue: bool,
+        incident_resolved: bool
+    ) -> float:
+        """Calculate reward for this step (cumulative, not clamped)."""
+        reward = 0.0
+        
+        if action.action_type.startswith("inspect_"):
+            if is_relevant:
+                reward += 1.0  # inspection reward
+        elif action.action_type in ["restart_service", "scale_workers", "restart_database"]:
+            if solves_issue:
+                reward += 5.0
+            else:
+                reward -= 2.0
+        elif action.action_type == "declare_healthy":
+            if incident_resolved:
+                reward += 10.0
+        elif action.action_type == "declare_unfixable":
+            reward -= 5.0
+        else:
+            reward -= 0.1
+        
+        return reward
