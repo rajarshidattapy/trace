@@ -13,9 +13,9 @@ TRACE teaches the agent to:
 This isn't an easy game. We made it realistic:
 
 ✅ **Agent can't just see everything** — logs and deep metrics are hidden. You gotta ask for them.
-✅ **Every scenario is the same if you replay it** — no randomness to hide behind
-✅ **Actions are structured** — every fix needs a target (e.g., "scale the *api_workers* service")
-✅ **Rewards build up** — one bad decision doesn't break everything immediately
+✅ **Every scenario is the same if you replay it** — no randomness to hide behind  
+✅ **Actions are structured** — every fix needs a target (e.g., `api_workers`)  
+✅ **Rewards build up** — one bad decision doesn't break everything immediately  
 ✅ **We only grade on results** — did you fix it in time? That's what matters.  
 
 ## Get It Running
