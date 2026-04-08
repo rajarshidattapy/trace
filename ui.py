@@ -549,4 +549,4 @@ with gr.Blocks(title="TRACE v1 \u2014 Incident Response Demo") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(server_port=7861, share=True)
+    demo.launch(server_port=7860, share=False)
