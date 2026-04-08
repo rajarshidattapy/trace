@@ -11,7 +11,7 @@ pinned: false
 
 So here's the deal: your AI agent wakes up at 3 AM to a production incident. It sees some dashboards blinking red, but doesn't know what's actually wrong.
 
-![alt text](image.png)
+![alt text](docs/image.png)
 
 TRACE teaches the agent to:
 - **Look at the dashboards** (CPU, memory, error rates)
