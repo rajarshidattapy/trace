@@ -1,7 +1,7 @@
 """FastAPI server for TRACE environment."""
 
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -66,24 +66,28 @@ async def index():
 
 
 @app.post("/reset")
-async def reset_endpoint(request: ResetRequest) -> dict:
+async def reset_endpoint(request: dict = Body(default={})) -> dict:
     """Reset environment for new episode."""
     global current_task_id
     
+    # Use defaults if request is empty
+    task_id = request.get("task_id", "easy_cpu_spike")
+    seed = int(request.get("seed", 0))
+    
     try:
-        obs = env.reset(task_id=request.task_id, seed=request.seed)
-        current_task_id = request.task_id
+        obs = env.reset(task_id=task_id, seed=seed)
+        current_task_id = task_id
         
         return {
             "observation": obs.model_dump(),
             "info": {
-                "task_id": request.task_id,
+                "task_id": task_id,
                 "episode_id": generate_episode_id(),
                 "max_steps": {
                     "easy_cpu_spike": 5,
                     "medium_cascade": 7,
                     "hard_mixed": 8,
-                }[request.task_id],
+                }[task_id],
             }
         }
     except Exception as e:
