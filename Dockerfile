@@ -8,12 +8,12 @@ COPY . .
 # Install Python dependencies
 RUN pip install --no-cache-dir -e .
 
-# Expose ports
-EXPOSE 7860 7861
+# Expose port
+EXPOSE 7860
 
 # Copy startup script
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
-# Run both backend and UI
-CMD ["/app/start.sh"]
+# Run FastAPI backend
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
