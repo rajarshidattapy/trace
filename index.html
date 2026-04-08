@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRACE v1 — Incident Response Environment</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            margin-bottom: 30px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 20px;
+        }
+        
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+            color: #60a5fa;
+        }
+        
+        .header p {
+            color: #94a3b8;
+            font-size: 0.95em;
+        }
+        
+        .main-grid {
+            display: grid;
+            grid-template-columns: 300px 1fr 350px;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .panel {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .panel h3 {
+            font-size: 1.1em;
+            margin-bottom: 15px;
+            color: #60a5fa;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 10px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            color: #cbd5e1;
+        }
+        
+        select, input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 8px 12px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            border-radius: 4px;
+            font-size: 0.95em;
+        }
+        
+        select:hover, input:hover {
+            border-color: #60a5fa;
+        }
+        
+        button {
+            width: 100%;
+            padding: 10px 15px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.95em;
+            margin-bottom: 10px;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #2563eb;
+        }
+        
+        button:disabled {
+            background: #64748b;
+            cursor: not-allowed;
+        }
+        
+        .button-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        
+        .button-row button {
+            margin-bottom: 0;
+        }
+        
+        .metrics-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+        
+        .metrics-table td {
+            padding: 8px;
+            border-bottom: 1px solid #334155;
+        }
+        
+        .metrics-table td:first-child {
+            color: #94a3b8;
+        }
+        
+        .metrics-table td:nth-child(2) {
+            text-align: right;
+        }
+        
+        .status-good { color: #4ade80; }
+        .status-warn { color: #facc15; }
+        .status-bad { color: #f87171; }
+        
+        .narrator-box {
+            background: #1e3a5f;
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-size: 0.95em;
+            line-height: 1.7;
+        }
+        
+        .episode-log {
+            font-size: 0.85em;
+            background: #0f172a;
+            padding: 10px;
+            border-radius: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid #334155;
+        }
+        
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .status-msg {
+            padding: 10px;
+            background: #334155;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-size: 0.9em;
+        }
+        
+        .status-msg.success { background: #1e4620; color: #4ade80; }
+        .status-msg.error { background: #6f1c1c; color: #f87171; }
+        .status-msg.info { background: #1e3a5f; color: #60a5fa; }
+        
+        .divider {
+            border-top: 1px solid #334155;
+            margin: 15px 0;
+        }
+        
+        .score-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            font-size: 0.9em;
+        }
+        
+        .score-item {
+            background: #0f172a;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .score-item .label {
+            color: #94a3b8;
+            margin-bottom: 5px;
+        }
+        
+        .score-item .value {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #60a5fa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 TRACE v1 — Incident Response Environment</h1>
+            <p><strong>Teaching AI to fix production incidents.</strong> Pick a scenario, investigate the system, diagnose the root cause, apply a fix, and declare healthy.</p>
+        </div>
+        
+        <div class="main-grid">
+            <!-- LEFT PANEL: Controls -->
+            <div class="panel">
+                <h3>Controls</h3>
+                
+                <div class="form-group">
+                    <label>Scenario</label>
+                    <select id="taskDropdown">
+                        <option value="easy_cpu_spike">easy_cpu_spike</option>
+                        <option value="medium_cascade">medium_cascade</option>
+                        <option value="hard_mixed">hard_mixed</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Seed</label>
+                    <input type="number" id="seedInput" value="42">
+                </div>
+                
+                <div class="button-row">
+                    <button onclick="resetEnvironment()">Reset</button>
+                    <button onclick="autoDemo()">Auto Demo</button>
+                </div>
+                
+                <div class="divider"></div>
+                <h3>Take Action</h3>
+                
+                <div class="form-group">
+                    <label>Action Type</label>
+                    <select id="actionDropdown" onchange="updateTargets()">
+                        <option value="inspect_logs">inspect_logs</option>
+                        <option value="inspect_metrics">inspect_metrics</option>
+                        <option value="inspect_alert">inspect_alert</option>
+                        <option value="restart_service">restart_service</option>
+                        <option value="scale_workers">scale_workers</option>
+                        <option value="restart_database">restart_database</option>
+                        <option value="rollback_release">rollback_release</option>
+                        <option value="clear_queue">clear_queue</option>
+                        <option value="declare_healthy">declare_healthy</option>
+                        <option value="declare_unfixable">declare_unfixable</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Target</label>
+                    <select id="targetDropdown"></select>
+                </div>
+                
+                <div class="form-group" id="valueGroup" style="display:none;">
+                    <label>Value</label>
+                    <input type="number" id="valueInput" placeholder="e.g. 5">
+                </div>
+                
+                <button onclick="executeAction()">Execute Action</button>
+            </div>
+            
+            <!-- CENTER PANEL: Metrics & Status -->
+            <div class="panel">
+                <div class="status-msg" id="statusMsg">👉 Select a scenario and click Reset to begin.</div>
+                
+                <h3>System Metrics</h3>
+                <table class="metrics-table" id="metricsTable">
+                    <tr>
+                        <td colspan="2"><em>Reset to see metrics</em></td>
+                    </tr>
+                </table>
+                
+                <div class="divider"></div>
+                <h3>Services & Alerts</h3>
+                <div id="servicesAlerts" style="font-size: 0.9em;">
+                    <div id="servicesDisplay" style="margin-bottom: 10px;"><em>No services yet</em></div>
+                    <div id="alertsDisplay"><em>No alerts</em></div>
+                </div>
+                
+                <div class="divider"></div>
+                <h3>Last Inspection</h3>
+                <div id="inspectionDisplay" style="font-size: 0.9em;"><em>No inspection yet</em></div>
+            </div>
+            
+            <!-- RIGHT PANEL: Log & Narrator -->
+            <div class="panel">
+                <h3>Narrator</h3>
+                <div class="narrator-box" id="narratorBox">
+                    Welcome! This is a <strong>flight simulator for incident response</strong>.<br><br>
+                    You'll see a production system that's broken. Your job is to:<br>
+                    1. <strong>Inspect</strong> logs, metrics, and alerts<br>
+                    2. <strong>Diagnose</strong> the root cause<br>
+                    3. <strong>Fix</strong> it with the right remediation<br>
+                    4. <strong>Declare healthy</strong> once resolved<br><br>
+                    <em>Start by selecting a scenario and clicking Reset.</em>
+                </div>
+                
+                <div class="divider"></div>
+                <h3>Score</h3>
+                <div class="score-info">
+                    <div class="score-item">
+                        <div class="label">Reward</div>
+                        <div class="value" id="rewardValue">0.00</div>
+                    </div>
+                    <div class="score-item">
+                        <div class="label">Steps</div>
+                        <div class="value" id="stepsValue">0</div>
+                    </div>
+                </div>
+                
+                <div class="divider"></div>
+                <h3>Episode Log</h3>
+                <div class="episode-log" id="episodeLog">
+                    <div class="log-entry"><em>No actions yet</em></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let currentObs = null;
+        let episodeLog = [];
+        let isEpisodeDone = false;
+        
+        const TARGET_OPTIONS = {
+            "inspect_logs": ["api_workers", "queue_service", "database"],
+            "inspect_metrics": ["cpu_usage_pct", "memory_usage_pct", "error_rate_pct", "api_latency_ms", "queue_depth", "db_connections"],
+            "inspect_alert": ["alert_cpu_high", "alert_high_error_rate", "alert_queue_backlog", "alert_db_slow", "alert_pool_exhaustion"],
+            "restart_service": ["api_workers", "queue_service", "database"],
+            "scale_workers": ["api_workers"],
+            "restart_database": [],
+            "rollback_release": [],
+            "clear_queue": ["queue_service"],
+            "declare_healthy": [],
+            "declare_unfixable": [],
+        };
+        
+        function updateTargets() {
+            const action = document.getElementById("actionDropdown").value;
+            const targets = TARGET_OPTIONS[action] || [];
+            const targetSelect = document.getElementById("targetDropdown");
+            targetSelect.innerHTML = targets.map(t => `<option value="${t}">${t}</option>`).join('');
+            
+            const valueGroup = document.getElementById("valueGroup");
+            valueGroup.style.display = action === "scale_workers" ? "block" : "none";
+        }
+        
+        function formatMetricsTable(obs) {
+            if (!obs) return "<tr><td colspan='2'><em>No observation</em></td></tr>";
+            
+            const cpu = obs.cpu_usage_pct || 0;
+            const mem = obs.memory_usage_pct || 0;
+            const err = obs.error_rate_pct || 0;
+            const lat = obs.api_latency_ms || 0;
+            const queue = obs.queue_depth || 0;
+            
+            const statusClass = (val, warn, crit) => 
+                val > crit ? "status-bad" : val > warn ? "status-warn" : "status-good";
+            
+            return `
+                <tr><td>CPU Usage</td><td><span class="${statusClass(cpu, 50, 75)}">${cpu.toFixed(1)}%</span></td></tr>
+                <tr><td>Memory</td><td><span class="${statusClass(mem, 60, 80)}">${mem.toFixed(1)}%</span></td></tr>
+                <tr><td>Error Rate</td><td><span class="${statusClass(err, 2, 5)}">${err.toFixed(1)}%</span></td></tr>
+                <tr><td>Latency</td><td><span class="${statusClass(lat, 300, 1000)}">${lat.toFixed(0)}ms</span></td></tr>
+                <tr><td>Queue Depth</td><td><span class="${statusClass(queue, 100, 500)}">${queue}</span></td></tr>
+            `;
+        }
+        
+        function updateDisplay(obs, statusMsg, narrator) {
+            currentObs = obs;
+            
+            document.getElementById("statusMsg").textContent = statusMsg;
+            document.getElementById("metricsTable").innerHTML = formatMetricsTable(obs);
+            
+            if (obs && obs.services) {
+                const servicesList = Object.entries(obs.services)
+                    .map(([svc, status]) => `• ${svc}: <strong>${status}</strong>`)
+                    .join("<br>");
+                document.getElementById("servicesDisplay").innerHTML = servicesList || "No services";
+            }
+            
+            if (obs && obs.active_alerts) {
+                const alertsList = obs.active_alerts.length 
+                    ? obs.active_alerts.map(a => `🚨 ${a}`).join("<br>")
+                    : "✅ No active alerts";
+                document.getElementById("alertsDisplay").innerHTML = alertsList;
+            }
+            
+            if (obs && obs.last_inspection && obs.last_inspection.message) {
+                document.getElementById("inspectionDisplay").innerHTML = 
+                    `💡 <strong>${obs.last_inspection.message}</strong>`;
+            }
+            
+            if (narrator) {
+                document.getElementById("narratorBox").innerHTML = narrator;
+            }
+        }
+        
+        function updateScore() {
+            const totalReward = episodeLog.reduce((sum, e) => sum + (e.reward || 0), 0);
+            document.getElementById("rewardValue").textContent = totalReward.toFixed(2);
+            document.getElementById("stepsValue").textContent = episodeLog.length;
+        }
+        
+        function updateLog() {
+            const logEntries = episodeLog.map((e, i) => {
+                const reward = e.reward || 0;
+                const icon = reward > 0 ? '✅' : reward < 0 ? '❌' : '➖';
+                return `<div class="log-entry">${i+1}. <strong>${e.action}</strong> → ${icon} ${reward > 0 ? '+' : ''}${reward.toFixed(2)}</div>`;
+            }).join('');
+            document.getElementById("episodeLog").innerHTML = logEntries || "<div class='log-entry'><em>No actions yet</em></div>";
+        }
+        
+        async function resetEnvironment() {
+            const taskId = document.getElementById("taskDropdown").value;
+            const seed = parseInt(document.getElementById("seedInput").value) || 42;
+            
+            episodeLog = [];
+            isEpisodeDone = false;
+            
+            const res = await fetch(`${API_BASE}/reset`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ task_id: taskId, seed: seed })
+            });
+            
+            const data = await res.json();
+            updateDisplay(data.observation, `✅ Reset — ${taskId} | Seed: ${seed}`, 
+                `<strong>${taskId}</strong><br><em>Scenario loaded. Use inspect actions to diagnose.</em>`);
+            updateScore();
+            updateLog();
+        }
+        
+        async function executeAction() {
+            if (isEpisodeDone) {
+                document.getElementById("statusMsg").textContent = "🏁 Episode over. Reset to play again.";
+                return;
+            }
+            
+            const actionType = document.getElementById("actionDropdown").value;
+            const target = document.getElementById("targetDropdown").value || null;
+            const value = actionType === "scale_workers" 
+                ? parseFloat(document.getElementById("valueInput").value) 
+                : null;
+            
+            const res = await fetch(`${API_BASE}/step`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: { action_type: actionType, target, value } })
+            });
+            
+            const data = await res.json();
+            const obs = data.observation;
+            const reward = data.reward;
+            const done = data.done;
+            
+            episodeLog.push({ action: `${actionType}(${target || ''})`, reward, done });
+            
+            const rewardIcon = reward > 0 ? '✅' : reward < 0 ? '❌' : '➖';
+            let statusMsg = `Step ${episodeLog.length} — Reward: ${rewardIcon} ${reward > 0 ? '+' : ''}${reward.toFixed(2)}`;
+            if (done) {
+                statusMsg = data.info.success 
+                    ? `✅ Incident resolved! Score: ${data.info.final_grade.toFixed(3)}`
+                    : `❌ Failed — Score: ${data.info.final_grade.toFixed(3)}`;
+                isEpisodeDone = true;
+            }
+            
+            updateDisplay(obs, statusMsg, `Action executed: <strong>${actionType}</strong>`);
+            updateScore();
+            updateLog();
+        }
+        
+        async function autoDemo() {
+            alert("Auto Demo coming soon!");
+        }
+        
+        // Initialize
+        updateTargets();
+    </script>
+</body>
+</html>

@@ -3,7 +3,8 @@
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from trace.env import TraceEnv
 from trace.utils import generate_episode_id
@@ -47,9 +48,21 @@ current_task_id: str = None
 
 
 @app.get("/")
-async def root_redirect():
-    """Redirect browser visitors to the Gradio UI."""
-    return RedirectResponse(url="/ui")
+async def root():
+    """Serve the HTML UI."""
+    index_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    return {"message": "TRACE v1 API is running. Use /docs for API docs."}
+
+
+@app.get("/index.html")
+async def index():
+    """Serve the HTML UI at /index.html."""
+    index_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    raise HTTPException(status_code=404, detail="index.html not found")
 
 
 @app.post("/reset")
