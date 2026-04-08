@@ -2,6 +2,7 @@
 
 import os
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from trace.env import TraceEnv
 from trace.utils import generate_episode_id
@@ -14,6 +15,15 @@ app = FastAPI(
     title="TRACE",
     version="0.1.0",
     description="OpenEnv-compatible incident response environment"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Global environment instance
