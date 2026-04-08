@@ -1,3 +1,13 @@
+---
+title: TRACE v1
+emoji: 🔧
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_file: server/app.py
+pinned: false
+---
+
 # Trace
 
 So here's the deal: your AI agent wakes up at 3 AM to a production incident. It sees some dashboards blinking red, but doesn't know what's actually wrong.
