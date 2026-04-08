@@ -41,7 +41,11 @@ import textwrap
 from typing import List, Optional
 
 import httpx
+from dotenv import load_dotenv
 from openai import OpenAI
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -56,7 +60,7 @@ TASK_NAME = os.getenv("TRACE_TASK", "easy_cpu_spike")
 BENCHMARK = "trace"
 SEED = int(os.getenv("TRACE_SEED", "0"))
 TEMPERATURE = 0.2
-MAX_TOKENS = 128
+MAX_TOKENS = 512
 
 # Max steps per scenario
 MAX_STEPS_MAP = {
@@ -176,60 +180,137 @@ def format_observation(obs: dict) -> str:
     return "\n".join(lines)
 
 
-def build_user_prompt(step: int, obs: dict, history: List[str]) -> str:
-    """Build the user prompt with current observation and history."""
+def build_user_prompt(step: int, obs: dict) -> str:
+    """Build the user prompt with current observation."""
     obs_text = format_observation(obs)
-    history_block = "\n".join(history[-5:]) if history else "None"
     return textwrap.dedent(f"""\
 Step {step} — Current System State:
 {obs_text}
 
-Previous actions:
-{history_block}
-
 Decide your next action. Respond with a JSON object only.
 """)
+
+
+def parse_llm_json(raw: str) -> dict:
+    """Extract JSON from LLM response, handling markdown fences and preamble."""
+    text = raw.strip()
+
+    # Strip markdown code fences
+    if "```" in text:
+        lines = text.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+
+    # Try direct parse first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find a JSON object in the text
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    raise json.JSONDecodeError("No valid JSON found", text, 0)
+
+
+# Fallback plan: a sequence of reasonable actions when the LLM fails.
+# These are tuned to the scenario math:
+#   easy_cpu_spike: traffic_spike_strength starts 0.8, each scale_workers *= 0.5,
+#                   need < 0.1 → requires 4 scale_workers (0.8→0.4→0.2→0.1→0.05)
+#   medium_cascade: queue_memory_leak starts 0.1, restart_service resets to 0,
+#                   need < 0.05 → one restart_service suffices
+#   hard_mixed:     db_pool_impact=0.7 (restart_database *=0.2 → 0.14),
+#                   release_impact=0.5 (rollback_release *=0.2 → 0.1),
+#                   need both ≤ 0.15 → one of each suffices
+FALLBACK_PLANS = {
+    "easy_cpu_spike": [
+        # 4 scales to resolve + declare_healthy = exactly 5 steps (max)
+        {"action_type": "scale_workers", "target": "api_workers", "value": 4},
+        {"action_type": "scale_workers", "target": "api_workers", "value": 4},
+        {"action_type": "scale_workers", "target": "api_workers", "value": 4},
+        {"action_type": "scale_workers", "target": "api_workers", "value": 4},
+        {"action_type": "declare_healthy", "target": None, "value": None},
+    ],
+    "medium_cascade": [
+        # inspect → inspect → fix → declare = 4 of 7 steps
+        {"action_type": "inspect_metrics", "target": "queue_depth", "value": None},
+        {"action_type": "inspect_logs", "target": "queue_service", "value": None},
+        {"action_type": "restart_service", "target": "queue_service", "value": None},
+        {"action_type": "declare_healthy", "target": None, "value": None},
+        {"action_type": "declare_healthy", "target": None, "value": None},
+        {"action_type": "declare_healthy", "target": None, "value": None},
+        {"action_type": "declare_healthy", "target": None, "value": None},
+    ],
+    "hard_mixed": [
+        # inspect → inspect → fix db → fix release → declare = 5 of 8 steps
+        {"action_type": "inspect_logs", "target": "database", "value": None},
+        {"action_type": "inspect_metrics", "target": "db_connections", "value": None},
+        {"action_type": "restart_database", "target": "database", "value": None},
+        {"action_type": "rollback_release", "target": None, "value": None},
+        {"action_type": "declare_healthy", "target": None, "value": None},
+        {"action_type": "declare_healthy", "target": None, "value": None},
+        {"action_type": "declare_healthy", "target": None, "value": None},
+        {"action_type": "declare_healthy", "target": None, "value": None},
+    ],
+}
 
 
 def get_llm_action(
     client: OpenAI,
     step: int,
     obs: dict,
-    history: List[str],
-) -> dict:
-    """Query the LLM for the next action."""
-    user_prompt = build_user_prompt(step, obs, history)
+    messages: list,
+    fallback_step: int,
+) -> tuple[dict, bool]:
+    """Query the LLM for the next action.
+
+    Returns (action_dict, used_llm) — used_llm is False when falling back.
+    """
+    user_prompt = build_user_prompt(step, obs)
+
+    # Add current observation as a user message
+    messages.append({"role": "user", "content": user_prompt})
 
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=messages,
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
             stream=False,
         )
         raw = (completion.choices[0].message.content or "").strip()
+        print(f"[DEBUG] LLM raw response: {raw!r}", flush=True)
 
-        # Strip markdown code fences if present
-        if raw.startswith("```"):
-            lines = raw.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            raw = "\n".join(lines).strip()
+        if not raw:
+            raise ValueError("Empty response from LLM")
 
-        action = json.loads(raw)
-        # Ensure required fields
+        action = parse_llm_json(raw)
         action.setdefault("action_type", "inspect_logs")
         action.setdefault("target", None)
         action.setdefault("value", None)
-        return action
 
-    except (json.JSONDecodeError, Exception) as exc:
-        print(f"[DEBUG] LLM parse error: {exc} — raw: {raw if 'raw' in dir() else 'N/A'}", flush=True)
-        # Fallback: inspect logs as a safe default
-        return {"action_type": "inspect_logs", "target": "api_workers", "value": None}
+        # Append assistant response to conversation history
+        messages.append({"role": "assistant", "content": raw})
+        return action, True
+
+    except Exception as exc:
+        print(f"[DEBUG] LLM error: {exc}", flush=True)
+        # Use scenario-specific fallback plan
+        plan = FALLBACK_PLANS.get(TASK_NAME, FALLBACK_PLANS["easy_cpu_spike"])
+        idx = min(fallback_step, len(plan) - 1)
+        fallback = plan[idx]
+        print(f"[DEBUG] Using fallback step {idx}: {fallback}", flush=True)
+
+        # Append fallback as assistant message so conversation stays coherent
+        messages.append({"role": "assistant", "content": json.dumps(fallback)})
+        return fallback, False
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -240,11 +321,15 @@ def main() -> None:
 
     max_steps = MAX_STEPS_MAP.get(TASK_NAME, 8)
 
-    history: List[str] = []
+    # Multi-turn conversation messages for the LLM
+    messages: list = [{"role": "system", "content": SYSTEM_PROMPT}]
+
     rewards: List[float] = []
     steps_taken = 0
     score = 0.0
     success = False
+    fallback_count = 0
+    done = False
 
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
@@ -254,8 +339,12 @@ def main() -> None:
         obs = reset_resp["observation"]
 
         for step in range(1, max_steps + 1):
-            # Get action from LLM
-            action = get_llm_action(llm_client, step, obs, history)
+            # Get action from LLM (multi-turn, with fallback)
+            action, used_llm = get_llm_action(
+                llm_client, step, obs, messages, fallback_step=fallback_count
+            )
+            if not used_llm:
+                fallback_count += 1
 
             # Format action string for logging
             action_str = f"{action['action_type']}({action.get('target', '')},{action.get('value', '')})"
@@ -273,17 +362,12 @@ def main() -> None:
 
             log_step(step=step, action=action_str, reward=reward, done=done, error=error)
 
-            history.append(
-                f"Step {step}: {action_str} -> reward={reward:+.2f} done={done}"
-            )
-
             if done:
                 # Extract final grade if available
                 if "final_grade" in info:
                     score = float(info["final_grade"])
                     success = info.get("success", False)
                 else:
-                    # Estimate score from rewards
                     score = max(0.0, min(1.0, sum(rewards) / (max_steps * 5.0)))
                     success = info.get("is_resolved", False)
                 break

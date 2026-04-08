@@ -35,6 +35,12 @@ inference = [
     "openai>=1.0.0",
 ]
 
+[project.scripts]
+server = "server.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["trace", "server"]
+
 [tool.hatch.version]
 path = "trace/__init__.py"
 
