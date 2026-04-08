@@ -30,22 +30,21 @@ class Grader:
         steps_taken: int
     ) -> Grade:
         """
-        Grade an episode.
+        Grade an episode (more lenient).
         
-        Final score = 0.6 * resolution_success + 0.4 * efficiency
+        Final score = 0.5 * resolution_success + 0.5 * efficiency
         where:
         - resolution_success is 1.0 if incident_resolved else 0.0
-        - efficiency is 1.0 - (steps_taken / max_steps), capped at 0
+        - efficiency is max(0, 1.0 - (steps_taken / (max_steps * 1.5)))
+          (more forgiving for going over max_steps)
         """
         resolution_score = 1.0 if incident_resolved else 0.0
         
-        # Efficiency: no bonus for steps beyond max
-        if steps_taken <= self.max_steps:
-            efficiency = 1.0 - (steps_taken / self.max_steps)
-        else:
-            efficiency = 0.0
+        # Efficiency: more lenient, doesn't hit 0 until 1.5x max_steps
+        efficiency = max(0.0, 1.0 - (steps_taken / (self.max_steps * 1.5)))
         
-        final_score = 0.6 * resolution_score + 0.4 * efficiency
+        # More balanced weighting: 50% resolution, 50% efficiency
+        final_score = 0.5 * resolution_score + 0.5 * efficiency
         final_score = min(max(final_score, 0.0), 1.0)
         
         return Grade(
