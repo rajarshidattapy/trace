@@ -1,0 +1,103 @@
+name: trace
+version: "0.1.0"
+description: "OpenEnv incident response environment"
+author: "Rajarshi Datta"
+
+# Environment interface
+interface:
+  entry_point: "server.app:app"
+  port: 7860
+
+# Tasks/benchmarks
+tasks:
+  - id: easy_cpu_spike
+    name: "CPU Spike Recovery"
+    description: "Agent must scale workers to recover from traffic spike"
+    max_steps: 5
+    difficulty: easy
+  
+  - id: medium_cascade
+    name: "Cascading Queue Failure"
+    description: "Agent must diagnose and restart queue service to prevent cascade"
+    max_steps: 7
+    difficulty: medium
+  
+  - id: hard_mixed
+    name: "Multi-service incident"
+    description: "DB + release regression; agent must diagnose and remediate"
+    max_steps: 8
+    difficulty: hard
+
+# Reward specification
+reward:
+  type: float
+  min: 0.0
+  max: 1.0
+  description: "Cumulative normalized reward [0, 1]"
+
+# Action schema
+action:
+  type: object
+  properties:
+    action_type:
+      type: string
+      enum:
+        - inspect_logs
+        - inspect_metrics
+        - inspect_alert
+        - restart_service
+        - scale_workers
+        - restart_database
+        - rollback_release
+        - clear_queue
+        - declare_healthy
+        - declare_unfixable
+    target:
+      type: string
+      nullable: true
+    value:
+      type: number
+      nullable: true
+
+# Observation schema
+observation:
+  type: object
+  properties:
+    timestamp:
+      type: string
+    cpu_usage_pct:
+      type: number
+      minimum: 0
+      maximum: 100
+    memory_usage_pct:
+      type: number
+      minimum: 0
+      maximum: 100
+    error_rate_pct:
+      type: number
+      minimum: 0
+      maximum: 100
+    api_latency_ms:
+      type: number
+      minimum: 0
+    queue_depth:
+      type: integer
+      minimum: 0
+    services:
+      type: object
+      additionalProperties:
+        type: string
+    active_alerts:
+      type: array
+      items:
+        type: string
+    last_inspection:
+      type: object
+      nullable: true
+
+# Metadata
+metadata:
+  environment_type: "RL"
+  problem_statement: "Incident response in production infrastructure"
+  benchmark_suite: "OpenEnv"
+  validation_level: "full"
