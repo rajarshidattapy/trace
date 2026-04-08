@@ -4,6 +4,7 @@ import os
 from fastapi import FastAPI, HTTPException
 from pydantic import ValidationError
 from trace.env import TraceEnv
+from trace.utils import generate_episode_id
 from trace.models import (
     Observation, Action, StepResponse, ResetRequest,
     StateResponse, HealthResponse
@@ -33,12 +34,13 @@ async def reset_endpoint(request: ResetRequest) -> dict:
             "observation": obs.model_dump(),
             "info": {
                 "task_id": request.task_id,
+                "episode_id": generate_episode_id(),
                 "max_steps": {
                     "easy_cpu_spike": 5,
                     "medium_cascade": 7,
                     "hard_mixed": 8,
                 }[request.task_id],
-                "episode_id": str(request.seed)
+                "root_cause": env._get_root_cause()
             }
         }
     except Exception as e:
@@ -62,7 +64,10 @@ async def step_endpoint(request: dict) -> dict:
             "observation": obs.model_dump(),
             "reward": float(reward),
             "done": done,
-            "info": info
+            "info": {
+                **info,
+                "message": f"Action {action.action_type} executed"
+            }
         }
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))

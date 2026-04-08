@@ -38,6 +38,7 @@ class Simulator:
             observation, reward, done, info
         """
         self.step_count += 1
+        self.current_time += timedelta(seconds=30)  # deterministic time advance
         
         # Check if action is valid/relevant
         is_relevant = self._is_action_relevant(action)
@@ -162,11 +163,17 @@ class Simulator:
             self.root_cause_revealed[f"logs_{target}"] = True
             
             if self.task_id == "easy_cpu_spike":
-                return "Traffic spike detected. Consider scaling workers."
+                if target == "api_workers":
+                    return "Traffic spike detected. Request volume 5x normal. Consider scaling workers."
+                return "No significant issues found in this service logs."
             elif self.task_id == "medium_cascade":
-                return "Queue service memory usage is spiking. May need restart."
+                if target == "queue_service":
+                    return "Queue service memory usage is spiking. Heap allocation growing unbounded. Likely memory leak. May need restart."
+                return "Service affected by upstream queue backlog."
             elif self.task_id == "hard_mixed":
-                return "Database queries have increased since recent release."
+                if target == "database":
+                    return "Database queries have increased since recent release. New queries are inefficient and consuming connection pool."
+                return "Service experiencing elevated errors due to database issues."
         
         elif action.action_type == "inspect_metrics":
             target = action.target or ""
@@ -175,16 +182,38 @@ class Simulator:
             if target == "queue_depth":
                 return "Queue depth critical and growing. Service memory may be leaking."
             elif target == "db_connections":
-                return "Connection pool at 100% exhaustion. Restart needed."
+                return "Connection pool at 100% exhaustion. All connections in use. Restart needed."
+            elif target == "cpu_usage_pct":
+                if self.task_id == "easy_cpu_spike":
+                    return "CPU usage elevated due to high request volume. Workers at capacity."
+                return "CPU usage elevated but within expected range for current load."
+            elif target == "memory_usage_pct":
+                if self.task_id == "medium_cascade":
+                    return "Memory usage growing unbounded in queue service. Leak suspected."
+                return "Memory usage stable."
+            elif target == "error_rate_pct":
+                return "Error rate elevated. Correlates with service degradation."
+            elif target == "api_latency_ms":
+                if self.task_id == "hard_mixed":
+                    return "Latency spike correlated with database connection issues."
+                return "Latency elevated due to service degradation."
+            return "Metric data returned. No anomalies detected for this metric."
         
         elif action.action_type == "inspect_alert":
             alert_id = action.target or ""
             self.root_cause_revealed[f"alert_{alert_id}"] = True
             
             if "pool" in alert_id:
-                return "DB connection pool exhausted. Restart database."
+                return "DB connection pool exhausted. All connections in use. Restart database to recover."
             elif "queue" in alert_id:
-                return "Queue backlog growing due to service issue."
+                return "Queue backlog growing due to service memory leak."
+            elif "cpu" in alert_id:
+                return "CPU high due to elevated traffic. Consider scaling workers."
+            elif "error" in alert_id:
+                return "Error rate elevated due to upstream service issues."
+            elif "db_slow" in alert_id or "latency" in alert_id:
+                return "Database responding slowly. Connection pool may be saturated."
+            return "Alert acknowledged. No additional context available."
         
         return ""
     

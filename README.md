@@ -1,4 +1,4 @@
-# TRACE v1 — OpenEnv Incident Response Environment
+# TRACE — OpenEnv DevOps Response Environment
 
 **TRACE** (Triage, Response, Action, Cause, Evaluation) is a deterministic, partial-observability RL environment for **incident response in production infrastructure**. Built for the [Meta × PyTorch × Hugging Face OpenEnv Hackathon](https://huggingface.co/).
 

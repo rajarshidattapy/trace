@@ -8,8 +8,8 @@ class RewardCalculator:
     """Cumulative reward engine (not per-step clamped)."""
     
     # Action rewards (incremental, not clamped per step)
-    INSPECTION_REWARD = 1.0
-    DIAGNOSIS_REWARD = 0.5  # for relevant inspections
+    INSPECTION_REWARD = 1.0        # inspect_logs, inspect_metrics
+    ALERT_INSPECTION_REWARD = 0.5   # inspect_alert
     REMEDIATION_REWARD = 5.0
     DECLARE_HEALTHY_BONUS = 10.0
     DECLARE_UNHEALTHY_PENALTY = -5.0
@@ -43,7 +43,10 @@ class RewardCalculator:
         # Inspection actions
         if action.action_type.startswith("inspect_"):
             if is_relevant:
-                reward += self.INSPECTION_REWARD + self.DIAGNOSIS_REWARD
+                if action.action_type == "inspect_alert":
+                    reward += self.ALERT_INSPECTION_REWARD
+                else:
+                    reward += self.INSPECTION_REWARD
             else:
                 reward += self.IRRELEVANT_ACTION_PENALTY
         
