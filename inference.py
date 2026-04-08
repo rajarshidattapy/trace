@@ -54,7 +54,7 @@ API_BASE_URL = "https://router.huggingface.co/v1"
 MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 
 # TRACE environment server URL (local or remote)
-TRACE_SERVER_URL = os.getenv("TRACE_SERVER_URL", "http://localhost:7861")
+TRACE_SERVER_URL = os.getenv("TRACE_SERVER_URL", "http://localhost:7860")
 
 TASK_NAME = os.getenv("TRACE_TASK", "easy_cpu_spike")
 BENCHMARK = "trace"

@@ -3,6 +3,7 @@
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import ValidationError
 from trace.env import TraceEnv
 from trace.utils import generate_episode_id
@@ -26,9 +27,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount Gradio UI alongside FastAPI so both share port 7860 on HF Spaces
+try:
+    import gradio as gr
+    import importlib.util
+    _ui_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ui.py")
+    if os.path.exists(_ui_path):
+        spec = importlib.util.spec_from_file_location("ui", _ui_path)
+        ui_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ui_mod)
+        app = gr.mount_gradio_app(app, ui_mod.demo, path="/ui")
+        print("[INFO] Gradio UI mounted at /ui", flush=True)
+except Exception as e:
+    print(f"[INFO] Gradio UI not mounted: {e}", flush=True)
+
 # Global environment instance
 env = TraceEnv()
 current_task_id: str = None
+
+
+@app.get("/")
+async def root_redirect():
+    """Redirect browser visitors to the Gradio UI."""
+    return RedirectResponse(url="/ui")
 
 
 @app.post("/reset")

@@ -8,8 +8,8 @@ COPY . .
 # Install Python dependencies
 RUN pip install --no-cache-dir -e .
 
-# Expose ports (7860 for UI, 7861 for backend)
-EXPOSE 7860 7861
+# HF Spaces only exposes port 7860 — FastAPI + Gradio both run here
+EXPOSE 7860
 
 # Copy startup script
 COPY start.sh /app/start.sh
