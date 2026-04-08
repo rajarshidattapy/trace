@@ -47,7 +47,7 @@ class StepResponse(BaseModel):
 class ResetRequest(BaseModel):
     """Request to /reset endpoint."""
     
-    task_id: Literal["easy_cpu_spike", "medium_cascade", "hard_mixed"]
+    task_id: Literal["easy_cpu_spike", "medium_cascade", "hard_mixed"] = Field(default="easy_cpu_spike")
     seed: int = Field(default=0)
 
 
