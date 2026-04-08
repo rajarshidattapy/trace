@@ -45,9 +45,9 @@ from openai import OpenAI
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+API_KEY = os.getenv("HF_TOKEN")
+API_BASE_URL = "https://router.huggingface.co/v1"
+MODEL_NAME = "openai/gpt-oss-20b"
 
 # TRACE environment server URL (local or remote)
 TRACE_SERVER_URL = os.getenv("TRACE_SERVER_URL", "http://localhost:7860")
@@ -55,8 +55,8 @@ TRACE_SERVER_URL = os.getenv("TRACE_SERVER_URL", "http://localhost:7860")
 TASK_NAME = os.getenv("TRACE_TASK", "easy_cpu_spike")
 BENCHMARK = "trace"
 SEED = int(os.getenv("TRACE_SEED", "0"))
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "300"))
+TEMPERATURE = 0.2
+MAX_TOKENS = 128
 
 # Max steps per scenario
 MAX_STEPS_MAP = {
