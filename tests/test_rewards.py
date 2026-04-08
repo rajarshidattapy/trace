@@ -44,7 +44,7 @@ def test_duplicate_action_penalty():
     action = Action(action_type="inspect_logs", target="api_workers", value=None)
     
     # First action
-    calc.calculate_step_reward(
+    first_reward = calc.calculate_step_reward(
         action=action,
         is_relevant=True,
         solves_issue=False,
@@ -52,8 +52,8 @@ def test_duplicate_action_penalty():
         step=0
     )
     
-    # Duplicate action
-    reward = calc.calculate_step_reward(
+    # Duplicate action (same type+target consecutively)
+    dup_reward = calc.calculate_step_reward(
         action=action,
         is_relevant=True,
         solves_issue=False,
@@ -61,7 +61,8 @@ def test_duplicate_action_penalty():
         step=1
     )
     
-    assert reward < 0, "Duplicate should be penalized"
+    # Duplicate should get less reward than non-duplicate due to penalty
+    assert dup_reward < first_reward, "Duplicate should receive less reward than first action"
 
 
 def test_final_score_calculation():

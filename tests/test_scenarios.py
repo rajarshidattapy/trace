@@ -52,15 +52,19 @@ def test_medium_cascade_resolution():
 
 
 def test_hard_mixed_multi_step():
-    """Test that hard scenario requires multiple steps."""
+    """Test that hard scenario requires multiple remediation steps."""
     scenario = create_scenario("hard_mixed", seed=42)
     scenario.reset()
     
-    # Take multiple steps without actions
+    # Take multiple steps without actions — should stay unresolved
     for _ in range(5):
         scenario.step(action_taken=False)
         assert not scenario.is_resolved()
     
-    # One action enables resolution
+    # First remediation: 0.7 * 0.4 = 0.28 (still above 0.15 threshold)
     scenario.step(action_taken=True)
-    assert scenario.is_resolved()
+    assert not scenario.is_resolved(), "One action should not be enough for hard scenario"
+    
+    # Second remediation: 0.28 * 0.4 = 0.112 (below 0.15 threshold)
+    scenario.step(action_taken=True)
+    assert scenario.is_resolved(), "Two remediation actions should resolve hard scenario"
