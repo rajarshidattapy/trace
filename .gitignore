@@ -3,3 +3,5 @@ venv/
 .gradio/
 .pytest_cache
 .claude/
+__pycache__/
+*.pyc

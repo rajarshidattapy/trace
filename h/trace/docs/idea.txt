@@ -1,8 +1,0 @@
-Privacy is really important for us and we have taken the conscious call that we use models on cloud, not SLMs
-
-The challenge with SLMs is that the tech is not yet there to offer the intelligence that is needed. So we are doing the next most secure thing on the cloud with isolated environments. 
-
-Every user on Thine runs in their own isolated container - separate compute, separate database, encrypted at rest. A breach of one user's environment is physically contained to that one user. There is no shared pool where 'everyone's data' lives together. We can’t even access user data to debug the agent, which ofc makes our job a lot harder but it is key for user trust. 
-
-We have all the certifications too but the key here are principles where user data and paramount to everything.
-
