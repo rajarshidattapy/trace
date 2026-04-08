@@ -1,213 +1,178 @@
-# TRACE
+# Trace
 
-**Build-ready production v1 for Meta × PyTorch × Hugging Face OpenEnv Hackathon**
+So here's the deal: your AI agent wakes up at 3 AM to a production incident. It sees some dashboards blinking red, but doesn't know what's actually wrong.
 
-TRACE is a **deterministic, partially-observable RL environment** for incident response in production infrastructure. An AI agent learns to:
+TRACE teaches the agent to:
+- **Look at the dashboards** (CPU, memory, error rates)
+- **Dig into the logs** (inspect_logs = ask "what happened?")
+- **Figure out the root cause** (by trying fixes and seeing if they work)
+- **Fix it** (restart services, scale up workers, etc.)
 
-1. **Observe** basic telemetry (CPU, memory, latency, error_rate, queue_depth)
-2. **Inspect** hidden details (logs, metrics, alert context)
-3. **Diagnose** root causes (implicitly through remediation success)
-4. **Remediate** incidents (restart services, scale workers, restart databases)
+## The Twist
 
-## Key Design Decisions (v1)
+This isn't an easy game. We made it realistic:
 
-✅ **Partial Observability** — Ground truth hidden behind `inspect_*` actions  
-✅ **Deterministic Scenarios** — Reproducible by seed; 3 hand-crafted incidents  
-✅ **Action Structure** — All actions use `(action_type, target, value)` format  
-✅ **Cumulative Rewards** — No per-step clamping; normalized at episode end  
-✅ **Outcome-Based Grading** — Score = 0.6×resolution + 0.4×efficiency (no diagnosis_accuracy)  
-✅ **OpenEnv Compliant** — `pyproject.toml`, `server/app.py`, `openenv.yaml`  
+✅ **Agent can't just see everything** — logs and deep metrics are hidden. You gotta ask for them.
+✅ **Every scenario is the same if you replay it** — no randomness to hide behind  
+✅ **Actions are structured** — every fix needs a target (e.g., `api_workers`)  
+✅ **Rewards build up** — one bad decision doesn't break everything immediately  
+✅ **We only grade on results** — did you fix it in time? That's what matters.  
 
-## Quick Start
+## Get It Running
 
-### Prerequisites
-
+**Setup** (one time):
 ```bash
 python -m venv venv
 ./venv/Scripts/activate  # Windows
 pip install -e .
 ```
 
-### Run Server
-
+**Then**:
 ```bash
+# Terminal 1: Start the server
 uvicorn server.app:app --host 0.0.0.0 --port 7860
-```
 
-### Run Inference
+# Terminal 2: Run tests to make sure it works
+pytest tests/ -v
 
-```bash
+# Terminal 3: Try the demo agent
 python inference.py
 ```
 
-### Run Tests
-
-```bash
-pytest tests/ -v
-```
-
-## Project Structure
+## What's Inside 📦
 
 ```
 TRACE/
-├── pyproject.toml           # Project definition
-├── requirements.txt         # Dependencies
-├── openenv.yaml             # Environment metadata
-├── Dockerfile               # Containerization
-├── README.md                # This file
+├── pyproject.toml         # Project config (OpenEnv wants this)
+├── openenv.yaml           # Tells OpenEnv how to run us
+├── Dockerfile             # For containerization
+├── README.md              # This file
 │
-├── agent.md                 # Build-ready v1 spec
-├── inference.py             # Agent policy demo
+├── server/                # The API server
+│   └── app.py             # Actually runs /reset, /step, /state, /health
 │
-├── trace/                   # Core environment package
-│   ├── __init__.py
-│   ├── models.py            # Pydantic schemas
-│   ├── env.py               # TraceEnv gym-like interface
-│   ├── scenarios.py         # Deterministic scenario generators
-│   ├── simulator.py         # State transition engine
-│   ├── rewards.py           # Cumulative reward calculator
-│   ├── graders.py           # Outcome-based grader
-│   └── utils.py             # Helpers
+├── trace/                 # The environment logic
+│   ├── models.py          # Data structures
+│   ├── scenarios.py       # The 3 incidents
+│   ├── simulator.py       # Runs the scenario step by step
+│   ├── rewards.py         # Calculates points
+│   └── graders.py         # Final score
 │
-├── server/                  # FastAPI server
-│   ├── __init__.py
-│   └── app.py               # Routes: /reset, /step, /state, /health
+├── tests/                 # Everything's tested
+│   ├── test_scenarios.py  # Do scenarios work?
+│   ├── test_rewards.py    # Do points work?
+│   └── test_env.py        # Does the whole thing work?
 │
-└── tests/                   # Unit tests
-    ├── __init__.py
-    ├── test_env.py          # Environment interface
-    ├── test_scenarios.py    # Scenario determinism
-    ├── test_rewards.py      # Cumulative rewards
-    └── test_graders.py      # Scoring logic
+└── inference.py           # Demo: how an agent would play
 ```
 
-## Three Tasks
+## Three Incidents to Solve
 
-### 1. `easy_cpu_spike` (Max: 5 steps)
+### 1. Easy: The Traffic Spike (5 steps max)
 
-**Scenario:** Traffic spike causes CPU spike  
-**Observable:** CPU ↑85%, latency ↑500ms, error_rate ↑5%  
-**Hidden Root Cause:** Workload surge  
-**Solution:** `scale_workers("api_workers", 5)`  
+Your API is getting crushed. CPU is maxed out. Something's overloaded.
 
-### 2. `medium_cascade` (Max: 7 steps)
+**What you see:** CPU at 85%, latency jumping, errors starting  
+**What you don't see:** It's just too much traffic  
+**What to do:** Add more workers (`scale_workers`)
 
-**Scenario:** Queue memory leak cascades to workers  
-**Observable:** Queue_depth rising, services degrading  
-**Hidden Root Cause:** Queue service memory leak  
-**Solution:** `restart_service("queue_service")`  
+---
 
-### 3. `hard_mixed` (Max: 8 steps)
+### 2. Medium: The Cascade (7 steps max)
 
-**Scenario:** DB pool exhausted + bad release  
-**Observable:** Error spike (20%), latency spike (2000ms), CPU high  
-**Hidden Root Cause:** DB connection pool + inefficient queries  
-**Solution:** `restart_database()` + optional `rollback_release()`  
+Your queue service has a memory leak. As memory fills up, it starts dropping requests. Other services timeout waiting for it. Everything falls apart together.
 
-## API Specification
+**What you see:** Queue backing up, workers getting slower, more errors  
+**What you don't see:** There's a memory leak you need to restart to fix  
+**What to do:** Restart the queue service
 
-### POST /reset
+---
 
-```json
-Request:
-{
-    "task_id": "easy_cpu_spike",
-    "seed": 42
-}
+### 3. Hard: The Two-Problem Incident (8 steps max)
 
-Response:
-{
-    "observation": {...},
-    "info": {"task_id": "easy_cpu_spike", "max_steps": 5}
-}
-```
+Someone deployed new code that queries the database inefficiently. Now the DB connection pool is exhausted. Plus there's a high CPU spike that's... actually a symptom, not the problem.
 
-### POST /step
+**What you see:** Tons of errors, crazy high latency, CPU spike, DB is slow  
+**What you don't see:** The deploy broke the queries, and the pool is full  
+**What to do:** Restart the database (and maybe rollback the release)  
 
-```json
-Request:
-{
-    "action": {
-        "action_type": "scale_workers",
-        "target": "api_workers",
-        "value": 5
-    }
-}
+## API (How to Talk to TRACE)
 
-Response:
-{
-    "observation": {...},
-    "reward": 5.0,
-    "done": false,
-    "info": {...}
-}
-```
-
-### GET /state
-
-```json
-Response:
-{
-    "observation": {...},
-    "episode_reward": 5.0,
-    "steps": 1,
-    "done": false
-}
-```
-
-### GET /health
-
-```json
-Response:
-{
-    "status": "healthy",
-    "version": "0.1.0"
-}
-```
-
-## Reward Mechanism
-
-**Rewards accumulate and are only normalized at episode end (NOT per-step clamped).**
-
-Step rewards:
-- +1.0 for relevant inspection
-- +5.0 for successful remediation
-- -0.5 for duplicate action
-- -2.0 for harmful action
-- +10.0 bonus for correct `declare_healthy`
-
-Final score: `0.6 * resolution + 0.4 * efficiency`
-
-## Validation
-
+### Start an incident
 ```bash
-openenv validate
-./validate-submission.sh
+POST /reset
+{"task_id": "easy_cpu_spike", "seed": 42}
+→ You get the first observation (dashboards showing the problem)
 ```
 
-## Deployment
+### Take an action
+```bash
+POST /step
+{"action": {"action_type": "scale_workers", "target": "api_workers", "value": 5}}
+→ You get the new state, points earned this step, and whether it's fixed
+```
 
-### Docker
+### Check status anytime
+```bash
+GET /state
+→ Current dashboards, points so far, step count
+```
 
+### Is the server alive?
+```bash
+GET /health
+→ {"status": "healthy"}
+```
+
+## How Scoring Works 
+
+**You get points for smart moves**, deductions for dumb ones. But points don't count until the episode ends (no cliff-falling mid-incident).
+
+**During the incident:**
+- +1 for asking smart questions (logging, metrics checks)
+- +5 for actually fixing something
+- -0.5 for doing the same thing twice
+- -2 for making things worse
+- +10 for successfully resolving it
+- -5 if you claim it's fixed but it's not
+
+**Final score:**
+```
+Did you fix it?           → 60% of score
+How fast did you fix it?  → 40% of score
+```
+
+So speed matters, but not as much as actually *fixing* things.
+
+## Deploy It
+
+**Local** (for testing):
 ```bash
 docker build -t trace:latest .
 docker run -p 7860:7860 trace:latest
 ```
 
-### HF Spaces
-
-Push to `meta-trace` Space, enable auto-deploy.
-
-## Success Criteria
-
-✅ `openenv validate` passes  
-✅ 3 deterministic scenarios  
-✅ Cumulative-normalized rewards  
-✅ Partial observability  
-✅ (action_type, target, value) format  
-✅ Grader: 0.6×success + 0.4×efficiency  
-✅ All tests pass  
+**To the cloud** (Hugging Face Spaces):
+Push to the `meta-trace` repo and enable auto-deploy. Done.
 
 ---
 
-**Status:** Build-ready. See [agent.md](agent.md) for full spec.
+## Check If It Works
+
+```bash
+openenv validate  # Does the API work?
+./validate-submission.sh  # Full checks
+```
+
+Should see:
+- ✅ Server comes up  
+- ✅ Scenarios work and are reproducible  
+- ✅ Rewards actually accumulate  
+- ✅ Agent can fix incidents  
+- ✅ Tests pass    
+
+---
+
+**Want the deep dive?** See [agent.md](agent.md).
+
+**Ready to build?** `pip install -e .` and go! 

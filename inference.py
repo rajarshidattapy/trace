@@ -1,5 +1,5 @@
 """
-Inference Script Example
+TRACE v1 — Inference Script
 ===================================
 MANDATORY
 - Before submitting, ensure the following variables are defined in your environment configuration:
@@ -33,49 +33,39 @@ STDOUT FORMAT
     - error is the raw last_action_error string, or null if none.
     - All fields on a single line with no newlines within a line.
     - Each tasks should return score in [0, 1]
-
-  Example:
-    [START] task=click-test env=miniwob model=Qwen3-VL-30B
-    [STEP] step=1 action=click('123') reward=0.00 done=false error=null
-    [STEP] step=2 action=fill('456','text') reward=0.00 done=false error=null
-    [STEP] step=3 action=click('789') reward=1.00 done=true error=null
-    [END] success=true steps=3 score=1.00 rewards=0.00,0.00,1.00
 """
 
-import asyncio
+import json
 import os
 import textwrap
 from typing import List, Optional
 
+import httpx
 from openai import OpenAI
 
-from my_env_v4 import MyEnvV4Action, MyEnvV4Env
-IMAGE_NAME = os.getenv("IMAGE_NAME") # If you are using docker image 
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+# ── Configuration ────────────────────────────────────────────────────────────
 
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-TASK_NAME = os.getenv("MY_ENV_V4_TASK", "echo")
-BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "my_env_v4")
-MAX_STEPS = 8
-TEMPERATURE = 0.7
-MAX_TOKENS = 150
-SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 
-# Max possible reward: each token contributes 0.1, across all steps
-_MAX_REWARD_PER_STEP = MAX_TOKENS * 0.1
-MAX_TOTAL_REWARD = MAX_STEPS * _MAX_REWARD_PER_STEP
+# TRACE environment server URL (local or remote)
+TRACE_SERVER_URL = os.getenv("TRACE_SERVER_URL", "http://localhost:7860")
 
-SYSTEM_PROMPT = textwrap.dedent(
-    """
-    You are interacting with a simple echo environment.
-    Each turn you must send a message. The environment will echo it back.
-    Reward is proportional to message length: reward = len(message) * 0.1
-    Your goal is to maximize total reward by sending meaningful, substantive messages.
-    Reply with exactly one message string — no quotes, no prefixes, just the message text.
-    """
-).strip()
+TASK_NAME = os.getenv("TRACE_TASK", "easy_cpu_spike")
+BENCHMARK = "trace"
+SEED = int(os.getenv("TRACE_SEED", "0"))
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "300"))
 
+# Max steps per scenario
+MAX_STEPS_MAP = {
+    "easy_cpu_spike": 5,
+    "medium_cascade": 7,
+    "hard_mixed": 8,
+}
+
+# ── Logging helpers ──────────────────────────────────────────────────────────
 
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
@@ -92,25 +82,124 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
 
 
-def build_user_prompt(step: int, last_echoed: str, last_reward: float, history: List[str]) -> str:
-    history_block = "\n".join(history[-4:]) if history else "None"
-    return textwrap.dedent(
-        f"""
-        Step: {step}
-        Last echoed message: {last_echoed!r}
-        Last reward: {last_reward:.2f}
-        Previous steps:
-        {history_block}
-        Send your next message.
-        """
-    ).strip()
+# ── TRACE HTTP client ────────────────────────────────────────────────────────
+
+class TraceClient:
+    """Simple HTTP client for the TRACE environment server."""
+
+    def __init__(self, base_url: str):
+        self.base_url = base_url.rstrip("/")
+        self.client = httpx.Client(timeout=30.0)
+
+    def reset(self, task_id: str, seed: int = 0) -> dict:
+        resp = self.client.post(
+            f"{self.base_url}/reset",
+            json={"task_id": task_id, "seed": seed},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def step(self, action: dict) -> dict:
+        resp = self.client.post(
+            f"{self.base_url}/step",
+            json={"action": action},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def state(self) -> dict:
+        resp = self.client.get(f"{self.base_url}/state")
+        resp.raise_for_status()
+        return resp.json()
+
+    def health(self) -> dict:
+        resp = self.client.get(f"{self.base_url}/health")
+        resp.raise_for_status()
+        return resp.json()
+
+    def close(self):
+        self.client.close()
 
 
-def get_model_message(client: OpenAI, step: int, last_echoed: str, last_reward: float, history: List[str]) -> str:
-    user_prompt = build_user_prompt(step, last_echoed, last_reward, history)
+# ── System prompt ─────────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = textwrap.dedent("""\
+You are an expert production incident response agent. You are connected to the
+TRACE environment, which simulates real infrastructure incidents. Your goal is to:
+
+1. Observe the system metrics and alerts.
+2. Inspect logs, metrics, and alerts to discover the root cause.
+3. Take remediation actions to resolve the incident.
+4. Declare healthy once the incident is resolved.
+
+You MUST respond with a JSON object containing exactly these fields:
+{
+    "action_type": "<one of: inspect_logs, inspect_metrics, inspect_alert, restart_service, scale_workers, restart_database, rollback_release, clear_queue, declare_healthy, declare_unfixable>",
+    "target": "<service name, metric name, or alert id — or null>",
+    "value": <numeric value for scale_workers, or null>
+}
+
+Available services: api_workers, queue_service, database
+Available metrics for inspect_metrics: cpu_usage_pct, memory_usage_pct, error_rate_pct, api_latency_ms, queue_depth, db_connections
+
+Strategy tips:
+- Start by inspecting logs or metrics of services that appear degraded.
+- Look at active alerts and inspect them for context.
+- Once you identify the root cause, take the appropriate remediation action.
+- After remediation, declare_healthy if metrics have improved.
+
+Respond ONLY with the JSON object. No explanation, no markdown, no extra text.
+""")
+
+
+def format_observation(obs: dict) -> str:
+    """Format observation into a readable string for the LLM."""
+    lines = [
+        f"Timestamp: {obs.get('timestamp', 'N/A')}",
+        f"CPU Usage: {obs.get('cpu_usage_pct', 0):.1f}%",
+        f"Memory Usage: {obs.get('memory_usage_pct', 0):.1f}%",
+        f"Error Rate: {obs.get('error_rate_pct', 0):.1f}%",
+        f"API Latency: {obs.get('api_latency_ms', 0):.0f} ms",
+        f"Queue Depth: {obs.get('queue_depth', 0)}",
+        f"Services: {json.dumps(obs.get('services', {}))}",
+        f"Active Alerts: {json.dumps(obs.get('active_alerts', []))}",
+    ]
+    inspection = obs.get("last_inspection")
+    if inspection:
+        lines.append(f"Last Inspection Result: {json.dumps(inspection)}")
+    return "\n".join(lines)
+
+
+def build_user_prompt(step: int, obs: dict, history: List[str]) -> str:
+    """Build the user prompt with current observation and history."""
+    obs_text = format_observation(obs)
+    history_block = "\n".join(history[-5:]) if history else "None"
+    return textwrap.dedent(f"""\
+Step {step} — Current System State:
+{obs_text}
+
+Previous actions:
+{history_block}
+
+Decide your next action. Respond with a JSON object only.
+""")
+
+
+def get_llm_action(
+    client: OpenAI,
+    step: int,
+    obs: dict,
+    history: List[str],
+) -> dict:
+    """Query the LLM for the next action."""
+    user_prompt = build_user_prompt(step, obs, history)
+
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
@@ -122,17 +211,34 @@ def get_model_message(client: OpenAI, step: int, last_echoed: str, last_reward: 
             max_tokens=MAX_TOKENS,
             stream=False,
         )
-        text = (completion.choices[0].message.content or "").strip()
-        return text if text else "hello"
-    except Exception as exc:
-        print(f"[DEBUG] Model request failed: {exc}", flush=True)
-        return "hello"
+        raw = (completion.choices[0].message.content or "").strip()
+
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            raw = "\n".join(lines).strip()
+
+        action = json.loads(raw)
+        # Ensure required fields
+        action.setdefault("action_type", "inspect_logs")
+        action.setdefault("target", None)
+        action.setdefault("value", None)
+        return action
+
+    except (json.JSONDecodeError, Exception) as exc:
+        print(f"[DEBUG] LLM parse error: {exc} — raw: {raw if 'raw' in dir() else 'N/A'}", flush=True)
+        # Fallback: inspect logs as a safe default
+        return {"action_type": "inspect_logs", "target": "api_workers", "value": None}
 
 
-async def main() -> None:
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+# ── Main loop ─────────────────────────────────────────────────────────────────
 
-    env = await MyEnvV4Env.from_docker_image(IMAGE_NAME)
+def main() -> None:
+    llm_client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    trace = TraceClient(TRACE_SERVER_URL)
+
+    max_steps = MAX_STEPS_MAP.get(TASK_NAME, 8)
 
     history: List[str] = []
     rewards: List[float] = []
@@ -143,46 +249,63 @@ async def main() -> None:
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        result = await env.reset() # OpenENV.reset()
-        last_echoed = result.observation.echoed_message
-        last_reward = 0.0
+        # Reset the environment
+        reset_resp = trace.reset(task_id=TASK_NAME, seed=SEED)
+        obs = reset_resp["observation"]
 
-        for step in range(1, MAX_STEPS + 1):
-            if result.done:
-                break
+        for step in range(1, max_steps + 1):
+            # Get action from LLM
+            action = get_llm_action(llm_client, step, obs, history)
 
-            message = get_model_message(client, step, last_echoed, last_reward, history)
+            # Format action string for logging
+            action_str = f"{action['action_type']}({action.get('target', '')},{action.get('value', '')})"
 
-            result = await env.step(MyEnvV4Action(message=message))
-            obs = result.observation
-
-            reward = result.reward or 0.0
-            done = result.done
-            error = None
+            # Execute step
+            step_resp = trace.step(action)
+            obs = step_resp["observation"]
+            reward = float(step_resp.get("reward", 0.0))
+            done = step_resp.get("done", False)
+            info = step_resp.get("info", {})
+            error = info.get("error", None)
 
             rewards.append(reward)
             steps_taken = step
-            last_echoed = obs.echoed_message
-            last_reward = reward
 
-            log_step(step=step, action=message, reward=reward, done=done, error=error)
+            log_step(step=step, action=action_str, reward=reward, done=done, error=error)
 
-            history.append(f"Step {step}: {message!r} -> reward {reward:+.2f}")
+            history.append(
+                f"Step {step}: {action_str} -> reward={reward:+.2f} done={done}"
+            )
 
             if done:
+                # Extract final grade if available
+                if "final_grade" in info:
+                    score = float(info["final_grade"])
+                    success = info.get("success", False)
+                else:
+                    # Estimate score from rewards
+                    score = max(0.0, min(1.0, sum(rewards) / (max_steps * 5.0)))
+                    success = info.get("is_resolved", False)
                 break
 
-        score = sum(rewards) / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.0
-        score = min(max(score, 0.0), 1.0)  # clamp to [0, 1]
-        success = score >= SUCCESS_SCORE_THRESHOLD
+        if not done:
+            # Episode ended by hitting max_steps without terminal action
+            state_resp = trace.state()
+            score = 0.0
+            success = False
+
+    except Exception as exc:
+        print(f"[DEBUG] Exception during episode: {exc}", flush=True)
+        score = 0.0
+        success = False
 
     finally:
         try:
-            await env.close()
+            trace.close()
         except Exception as e:
-            print(f"[DEBUG] env.close() error (container cleanup): {e}", flush=True)
+            print(f"[DEBUG] trace.close() error: {e}", flush=True)
         log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

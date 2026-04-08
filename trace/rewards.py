@@ -38,21 +38,21 @@ class RewardCalculator:
         
         # Check for duplicate recent action
         if step > 0 and self.action_history[-1] == (action.action_type, action.target):
-            reward -= self.DUPLICATE_ACTION_PENALTY
+            reward += self.DUPLICATE_ACTION_PENALTY
         
         # Inspection actions
         if action.action_type.startswith("inspect_"):
             if is_relevant:
                 reward += self.INSPECTION_REWARD + self.DIAGNOSIS_REWARD
             else:
-                reward -= self.IRRELEVANT_ACTION_PENALTY
+                reward += self.IRRELEVANT_ACTION_PENALTY
         
         # Remediation actions
         elif action.action_type.startswith(("restart_", "scale_", "rollback_", "clear_")):
             if solves_issue:
                 reward += self.REMEDIATION_REWARD
             else:
-                reward -= self.HARMFUL_ACTION_PENALTY
+                reward += self.HARMFUL_ACTION_PENALTY
         
         # Terminal actions
         elif action.action_type == "declare_healthy":
@@ -62,10 +62,10 @@ class RewardCalculator:
                 reward += self.DECLARE_UNHEALTHY_PENALTY
         
         elif action.action_type == "declare_unfixable":
-            reward -= self.HARMFUL_ACTION_PENALTY
+            reward += self.HARMFUL_ACTION_PENALTY
         
         else:
-            reward -= self.IRRELEVANT_ACTION_PENALTY
+            reward += self.IRRELEVANT_ACTION_PENALTY
         
         # Record action
         self.action_history.append((action.action_type, action.target))

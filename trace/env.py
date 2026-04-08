@@ -41,9 +41,9 @@ class TraceEnv:
             raise RuntimeError("Environment not reset. Call reset() first.")
         
         # Progress simulator
-        obs, simulator_reward, sim_done, sim_info = self.simulator.step(action)
+        obs, sim_done, sim_info = self.simulator.step(action)
         
-        # Calculate step reward
+        # Calculate step reward via RewardCalculator
         is_relevant = self.simulator._is_action_relevant(action)
         solves_issue = self.simulator._does_action_solve(action)
         incident_resolved = self.simulator.scenario.is_resolved()

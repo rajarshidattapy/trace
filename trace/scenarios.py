@@ -30,6 +30,7 @@ class ScenarioEasyCPUSpike:
     MAX_STEPS = 5
     
     def __init__(self, seed: int = 0):
+        self.seed = seed
         self.state = ScenarioState(
             task_id="easy_cpu_spike",
             seed=seed,
@@ -74,6 +75,7 @@ class ScenarioMediumCascade:
     MAX_STEPS = 7
     
     def __init__(self, seed: int = 0):
+        self.seed = seed
         self.state = ScenarioState(
             task_id="medium_cascade",
             seed=seed,
@@ -117,6 +119,7 @@ class ScenarioHardMixed:
     MAX_STEPS = 8
     
     def __init__(self, seed: int = 0):
+        self.seed = seed
         self.state = ScenarioState(
             task_id="hard_mixed",
             seed=seed,

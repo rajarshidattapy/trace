@@ -58,21 +58,11 @@ class Simulator:
         
         incident_resolved = self.scenario.is_resolved()
         
-        # Calculate reward (cumulative, not per-step clamped)
-        reward = self._calculate_step_reward(
-            action=action,
-            is_relevant=is_relevant,
-            solves_issue=solves_issue,
-            incident_resolved=incident_resolved
-        )
-        
         # Build observation
         self.current_obs = self._build_observation(metrics, inspection_msg)
         
         # Check terminal condition
         done = action.action_type in ["declare_healthy", "declare_unfixable"]
-        if done and action.action_type == "declare_healthy" and not incident_resolved:
-            reward -= 5.0  # penalty for falsely declaring healthy
         
         info = {
             "step": self.step_count,
@@ -80,7 +70,7 @@ class Simulator:
             "is_resolved": incident_resolved,
         }
         
-        return self.current_obs, reward, done, info
+        return self.current_obs, done, info
     
     def _build_observation(self, metrics: dict, inspection_msg: str = None) -> Observation:
         """Build observation from metrics and optional inspection."""
@@ -157,7 +147,7 @@ class Simulator:
         root_cause = self._get_root_cause()
         
         if self.task_id == "easy_cpu_spike":
-            return action.action_type == "scale_workers" and action.action_type == "scale_workers"
+            return action.action_type == "scale_workers" and action.target == "api_workers"
         elif self.task_id == "medium_cascade":
             return action.action_type == "restart_service" and action.target == "queue_service"
         elif self.task_id == "hard_mixed":
@@ -208,30 +198,4 @@ class Simulator:
             return "db_connection_pool + release_regression"
         return "unknown"
     
-    def _calculate_step_reward(
-        self,
-        action: Action,
-        is_relevant: bool,
-        solves_issue: bool,
-        incident_resolved: bool
-    ) -> float:
-        """Calculate reward for this step (cumulative, not clamped)."""
-        reward = 0.0
-        
-        if action.action_type.startswith("inspect_"):
-            if is_relevant:
-                reward += 1.0  # inspection reward
-        elif action.action_type in ["restart_service", "scale_workers", "restart_database"]:
-            if solves_issue:
-                reward += 5.0
-            else:
-                reward -= 2.0
-        elif action.action_type == "declare_healthy":
-            if incident_resolved:
-                reward += 10.0
-        elif action.action_type == "declare_unfixable":
-            reward -= 5.0
-        else:
-            reward -= 0.1
-        
-        return reward
+
