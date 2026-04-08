@@ -40,17 +40,14 @@ class ScenarioEasyCPUSpike:
     def reset(self):
         self.state.reset()
     
-    def step(self, action_taken: bool = False) -> dict:
+    def step(self, resolved_action: str = None) -> dict:
         """Progress scenario. Return metrics."""
         self.state.step += 1
         rng = random.Random(self.seed + self.state.step)
-        
+
         # If fix applied (scale_workers), decay traffic
-        if action_taken:
+        if resolved_action == "scale_workers":
             self.state.traffic_spike_strength *= 0.5
-        else:
-            # Spike persists but doesn't worsen
-            pass
         
         cpu_usage = 30 + self.state.traffic_spike_strength * 60 + rng.gauss(0, 2)
         error_rate = 2 + self.state.traffic_spike_strength * 10
@@ -85,13 +82,13 @@ class ScenarioMediumCascade:
     def reset(self):
         self.state.reset()
     
-    def step(self, action_taken: bool = False) -> dict:
+    def step(self, resolved_action: str = None) -> dict:
         """Progress scenario. Return metrics."""
         self.state.step += 1
         rng = random.Random(self.seed + self.state.step)
-        
+
         # If fix applied (restart_service), reset memory leak
-        if action_taken:
+        if resolved_action == "restart_service":
             self.state.queue_memory_leak = 0
         else:
             # Leak grows exponentially
@@ -114,47 +111,49 @@ class ScenarioMediumCascade:
 
 
 class ScenarioHardMixed:
-    """Hard scenario: DB connection pool + release regression."""
-    
+    """Hard scenario: DB connection pool + release regression (requires both fixes)."""
+
     MAX_STEPS = 8
-    
+
     def __init__(self, seed: int = 0):
         self.seed = seed
+        self.db_pool_impact = 0.7       # fixed by restart_database
+        self.release_impact = 0.5       # fixed by rollback_release
         self.state = ScenarioState(
             task_id="hard_mixed",
             seed=seed,
-            db_release_impact=0.7  # starts high
         )
-    
+
     def reset(self):
         self.state.reset()
-    
-    def step(self, action_taken: bool = False) -> dict:
+        self.db_pool_impact = 0.7
+        self.release_impact = 0.5
+
+    def step(self, resolved_action: str = None) -> dict:
         """Progress scenario. Return metrics."""
         self.state.step += 1
         rng = random.Random(self.seed + self.state.step)
-        
-        # If fix applied (restart_database), decay impact
-        if action_taken:
-            self.state.db_release_impact *= 0.4
-        else:
-            # Impact persists
-            pass
-        
-        error_rate = 5 + self.state.db_release_impact * 25
-        latency = 100 + self.state.db_release_impact * 1900
-        
+
+        if resolved_action == "restart_database":
+            self.db_pool_impact *= 0.2
+        elif resolved_action == "rollback_release":
+            self.release_impact *= 0.2
+
+        combined = (self.db_pool_impact + self.release_impact) / 2
+        error_rate = 5 + combined * 25
+        latency = 100 + combined * 1900
+
         return {
-            "cpu_usage_pct": 55 + self.state.db_release_impact * 30 + rng.gauss(0, 3),
+            "cpu_usage_pct": 55 + combined * 30 + rng.gauss(0, 3),
             "error_rate_pct": min(100, error_rate),
             "api_latency_ms": max(100, latency),
-            "queue_depth": 50 + int(self.state.db_release_impact * 200),
-            "memory_usage_pct": 60 + self.state.db_release_impact * 20,
+            "queue_depth": 50 + int(combined * 200),
+            "memory_usage_pct": 60 + combined * 20,
         }
-    
+
     def is_resolved(self) -> bool:
-        """Check if incident is resolved."""
-        return self.state.db_release_impact < 0.15
+        """Check if incident is resolved — both fixes must be applied."""
+        return self.db_pool_impact <= 0.15 and self.release_impact <= 0.15
 
 
 def create_scenario(task_id: str, seed: int = 0):

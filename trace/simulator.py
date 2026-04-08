@@ -25,7 +25,7 @@ class Simulator:
         self.root_cause_revealed = {}
         
         # Generate initial state
-        metrics = self.scenario.step(action_taken=False)
+        metrics = self.scenario.step()
         self.current_obs = self._build_observation(metrics)
         
         return self.current_obs
@@ -50,9 +50,9 @@ class Simulator:
             "restart_service", "scale_workers", "restart_database",
             "rollback_release", "clear_queue"
         }
-        action_taken = action.action_type in remediation_actions and solves_issue
-        
-        metrics = self.scenario.step(action_taken=action_taken)
+        resolved_action = action.action_type if (action.action_type in remediation_actions and solves_issue) else None
+
+        metrics = self.scenario.step(resolved_action=resolved_action)
         
         # Handle inspection actions (reveal ground truth)
         inspection_msg = self._handle_inspection(action)
@@ -152,7 +152,7 @@ class Simulator:
         elif self.task_id == "medium_cascade":
             return action.action_type == "restart_service" and action.target == "queue_service"
         elif self.task_id == "hard_mixed":
-            return action.action_type == "restart_database"
+            return action.action_type in ("restart_database", "rollback_release")
         
         return False
     

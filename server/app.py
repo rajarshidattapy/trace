@@ -40,7 +40,6 @@ async def reset_endpoint(request: ResetRequest) -> dict:
                     "medium_cascade": 7,
                     "hard_mixed": 8,
                 }[request.task_id],
-                "root_cause": env._get_root_cause()
             }
         }
     except Exception as e:
